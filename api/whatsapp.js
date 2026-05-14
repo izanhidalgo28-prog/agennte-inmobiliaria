@@ -7,7 +7,12 @@ module.exports = async function handler(req, res) {
   const userMessage = req.body.Body.trim();
   const from = req.body.From;
 
-  if (!conversaciones[from]) conversaciones[from] = { historial: [], datos: {}, leadGuardado: false };
+  if (!conversaciones[from]) conversaciones[from] = {
+    paso: 0,
+    datos: {},
+    historial: [],
+    leadGuardado: false
+  };
   const conv = conversaciones[from];
 
   const SHEETS_URL = 'https://script.google.com/macros/s/AKfycbxNJTkjcBXCG7JGMWNPy1pqglZiHOwqek8nBUu9xYGB3X0gm-soUohxkEnIKx8opORy/exec';
@@ -22,110 +27,68 @@ module.exports = async function handler(req, res) {
     res.status(200).send(twiml.toString());
   }
 
-  async function notificarAgente(datos) {
+  async function guardarYNotificar() {
+    try {
+      await fetch(SHEETS_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          accion: 'lead',
+          nombre: conv.datos.nombre || '',
+          telefono: conv.datos.telefono || '',
+          busca: conv.datos.busca || '',
+          zona: conv.datos.zona || '',
+          presupuesto: conv.datos.presupuesto || '',
+          caracteristicas: conv.datos.caracteristicas || ''
+        })
+      });
+      console.log('Lead guardado');
+    } catch(e) { console.error('Sheets error:', e.message); }
+
     try {
       const client = twilio(TWILIO_SID, TWILIO_TOKEN);
       await client.messages.create({
         from: 'whatsapp:+14155238886',
         to: AGENTE_NUMERO,
-        body: `Nuevo lead!\nNombre: ${datos.nombre}\nTelefono: ${datos.telefono}\nBusca: ${datos.busca}\nZona: ${datos.zona}\nPresupuesto: ${datos.presupuesto}\nCaracteristicas: ${datos.caracteristicas}`
+        body: `Nuevo lead!\nNombre: ${conv.datos.nombre}\nTelefono: ${conv.datos.telefono}\nBusca: ${conv.datos.busca}\nZona: ${conv.datos.zona}\nPresupuesto: ${conv.datos.presupuesto}\nCaracteristicas: ${conv.datos.caracteristicas}`
       });
     } catch(e) { console.error('Twilio error:', e.message); }
   }
 
-  async function guardarLead(datos) {
-    try {
-      const r = await fetch(SHEETS_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          accion: 'lead',
-          nombre: datos.nombre || '',
-          telefono: datos.telefono || '',
-          busca: datos.busca || '',
-          zona: datos.zona || '',
-          presupuesto: datos.presupuesto || '',
-          caracteristicas: datos.caracteristicas || ''
-        })
-      });
-      console.log('Sheets response:', r.status);
-    } catch(e) { console.error('Sheets error:', e.message); }
+  if (conv.leadGuardado) {
+    return responder('Ya tenemos tus datos. Un agente te contactará pronto. Gracias!');
   }
 
-  const esTelefono = /^\d{9}$/.test(userMessage.replace(/\s/g,''));
+  // Flujo paso a paso
+  conv.paso++;
 
-  if (esTelefono && !conv.leadGuardado) {
+  if (conv.paso === 1) {
+    return responder('Hola! Soy tu agente inmobiliario virtual. Estoy aquí para ayudarte. Cuéntame, buscas comprar, alquilar o vender una propiedad?');
+  }
+  if (conv.paso === 2) {
+    conv.datos.busca = userMessage;
+    return responder('Perfecto. En qué zona o ciudad te gustaría?');
+  }
+  if (conv.paso === 3) {
+    conv.datos.zona = userMessage;
+    return responder('Cuál es tu presupuesto aproximado?');
+  }
+  if (conv.paso === 4) {
+    conv.datos.presupuesto = userMessage;
+    return responder('Qué características buscas? Por ejemplo habitaciones, garaje, terraza...');
+  }
+  if (conv.paso === 5) {
+    conv.datos.caracteristicas = userMessage;
+    return responder('Cuál es tu nombre completo?');
+  }
+  if (conv.paso === 6) {
+    conv.datos.nombre = userMessage;
+    return responder('Por último, cuál es tu número de teléfono de 9 dígitos?');
+  }
+  if (conv.paso === 7) {
     conv.datos.telefono = userMessage;
     conv.leadGuardado = true;
-    await guardarLead(conv.datos);
-    await notificarAgente(conv.datos);
-    return responder('Perfecto, tengo todos tus datos. Un agente especializado te llamara en menos de 24 horas. Gracias por contactarnos!');
-  }
-
-  if (conv.leadGuardado) {
-    return responder('Ya tenemos tus datos. Un agente te llamara pronto. Gracias!');
-  }
-
-  conv.historial.push({ role: 'user', content: userMessage });
-
-  try {
-  const extractor = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': process.env.ANTHROPIC_API_KEY,
-      'anthropic-version': '2023-06-01'
-    },
-    body: JSON.stringify({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 200,
-      system: `Extrae datos de esta conversación inmobiliaria y devuelve SOLO un JSON con estos campos: {"busca":"","zona":"","presupuesto":"","caracteristicas":"","nombre":""}. Si no hay dato deja el campo vacío. Solo JSON, sin explicaciones.`,
-      messages: [{ role: 'user', content: conv.historial.map(m => (m.role === 'user' ? 'Cliente: ' : 'Agente: ') + m.content).join('\n') }]
-    })
-  });
-  const extData = await extractor.json();
-  const extracted = JSON.parse(extData.content[0].text);
-  conv.datos = { ...conv.datos, ...extracted };
-} catch(e) { console.error('Extractor error:', e.message); }
-
-  const system = `Eres un agente de ventas inmobiliario virtual experto y amable. Tu objetivo es captar el interés del cliente y conseguir sus datos para que un agente humano le llame.
-
-FLUJO ESTRICTO - sigue este orden exacto:
-1. Pregunta que busca (comprar, alquilar, vender)
-2. Pregunta zona o ciudad
-3. Pregunta presupuesto
-4. Pregunta características (habitaciones, garaje, terraza...)
-5. Pide nombre completo
-6. Pide numero de telefono de 9 digitos
-
-IMPORTANTE: Cuando el cliente te dé su número de teléfono de 9 dígitos, NO respondas nada más - el sistema lo procesará automáticamente.
-
-REGLAS:
-- Responde en español
-- Máximo 2 oraciones por respuesta
-- Una sola pregunta a la vez
-- No uses asteriscos ni markdown, solo texto plano`;
-
-  try {
-    const r = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': process.env.ANTHROPIC_API_KEY,
-        'anthropic-version': '2023-06-01'
-      },
-      body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 200,
-        system,
-        messages: conv.historial
-      })
-    });
-    const data = await r.json();
-    const reply = data.content[0].text;
-    conv.historial.push({ role: 'assistant', content: reply });
-    responder(reply);
-  } catch(e) {
-    responder('Lo siento, hubo un error. Intentalo de nuevo.');
+    await guardarYNotificar();
+    return responder(`Perfecto ${conv.datos.nombre}, tengo todos tus datos. Un agente especializado te llamará en menos de 24 horas. Gracias por contactarnos!`);
   }
 };
