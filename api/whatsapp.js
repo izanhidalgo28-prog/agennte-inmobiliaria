@@ -68,13 +68,25 @@ module.exports = async function handler(req, res) {
 
   conv.historial.push({ role: 'user', content: userMessage });
 
-  const txt = conv.historial.map(m => m.content).join(' ').toLowerCase();
-  if (txt.includes('comprar')) conv.datos.busca = 'Comprar';
-  if (txt.includes('alquilar')) conv.datos.busca = 'Alquilar';
-  if (txt.includes('vender')) conv.datos.busca = 'Vender';
-
-  const userMsgs = conv.historial.filter(m => m.role === 'user');
-  if (userMsgs.length === 5) conv.datos.nombre = userMessage;
+  try {
+  const extractor = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': process.env.ANTHROPIC_API_KEY,
+      'anthropic-version': '2023-06-01'
+    },
+    body: JSON.stringify({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 200,
+      system: `Extrae datos de esta conversación inmobiliaria y devuelve SOLO un JSON con estos campos: {"busca":"","zona":"","presupuesto":"","caracteristicas":"","nombre":""}. Si no hay dato deja el campo vacío. Solo JSON, sin explicaciones.`,
+      messages: [{ role: 'user', content: conv.historial.map(m => (m.role === 'user' ? 'Cliente: ' : 'Agente: ') + m.content).join('\n') }]
+    })
+  });
+  const extData = await extractor.json();
+  const extracted = JSON.parse(extData.content[0].text);
+  conv.datos = { ...conv.datos, ...extracted };
+} catch(e) { console.error('Extractor error:', e.message); }
 
   const system = `Eres un agente de ventas inmobiliario virtual experto y amable. Tu objetivo es captar el interés del cliente y conseguir sus datos para que un agente humano le llame.
 
