@@ -34,7 +34,7 @@ REGLAS:
 - Máximo 2-3 oraciones por respuesta
 - Haz solo UNA pregunta a la vez
 - Si el cliente da su teléfono, termina confirmando que le llamarán pronto
-- No inventes precios ni propiedades concretas`;
+- No inventes precios ni propiedades concretas
 - No uses markdown, asteriscos ni formato especial, solo texto plano`;
 
   if (!conv.historial) conv.historial = [];
