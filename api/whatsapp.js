@@ -96,7 +96,8 @@ REGLAS:
     const data = await r.json();
     let reply = data.content[0].text;
 
-    if (reply.includes('LEAD_COMPLETO')) {
+    const estelefono = /\b\d{9}\b/.test(userMessage);
+if (estelefono) {
       reply = reply.replace('LEAD_COMPLETO', '').trim();
       conv.datos.nombre = conv.datos.nombre || 'Sin nombre';
       conv.datos.telefono = userMessage;
