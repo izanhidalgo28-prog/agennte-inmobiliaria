@@ -1,5 +1,10 @@
 const twilio = require('twilio');
-const conversaciones = {};
+const { Redis } = require('@upstash/redis');
+
+const redis = new Redis({
+  url: process.env.UPSTASH_REDIS_REST_URL,
+  token: process.env.UPSTASH_REDIS_REST_TOKEN,
+});
 
 module.exports = async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end();
@@ -7,18 +12,18 @@ module.exports = async function handler(req, res) {
   const userMessage = req.body.Body.trim();
   const from = req.body.From;
 
-  if (!conversaciones[from]) conversaciones[from] = {
-    paso: 0,
-    datos: {},
-    historial: [],
-    leadGuardado: false
-  };
-  const conv = conversaciones[from];
-
   const SHEETS_URL = 'https://script.google.com/macros/s/AKfycbxNJTkjcBXCG7JGMWNPy1pqglZiHOwqek8nBUu9xYGB3X0gm-soUohxkEnIKx8opORy/exec';
   const TWILIO_SID = 'AC86a36860c56d30c195c4c83a1ad6fd45';
   const TWILIO_TOKEN = 'f9e4f906049ed68e4d91ab5de1b96726';
   const AGENTE_NUMERO = 'whatsapp:+34684190200';
+
+  // Cargar estado desde Redis
+  let conv = await redis.get(from);
+  if (!conv) conv = { paso: 0, datos: {}, leadGuardado: false };
+
+  async function guardarEstado() {
+    await redis.set(from, conv, { ex: 86400 }); // expira en 24h
+  }
 
   function responder(texto) {
     const twiml = new twilio.twiml.MessagingResponse();
@@ -42,7 +47,6 @@ module.exports = async function handler(req, res) {
           caracteristicas: conv.datos.caracteristicas || ''
         })
       });
-      console.log('Lead guardado');
     } catch(e) { console.error('Sheets error:', e.message); }
 
     try {
@@ -56,42 +60,50 @@ module.exports = async function handler(req, res) {
   }
 
   if (conv.leadGuardado) {
-    return responder('Ya tenemos tus datos. Un agente te contactará pronto. Gracias!');
+    return responder('Ya tenemos tus datos. Un agente te contactara pronto. Gracias!');
   }
-
-  // Flujo paso a paso
-  conv.paso++;
 
   if (conv.paso === 0) {
-  conv.paso = 1;
-  return responder('Hola! Soy tu agente inmobiliario virtual. Estoy aquí para ayudarte. Buscas comprar, alquilar o vender una propiedad?');
-}
+    conv.paso = 1;
+    await guardarEstado();
+    return responder('Hola! Soy tu agente inmobiliario virtual. Buscas comprar, alquilar o vender una propiedad?');
+  }
 
-conv.paso++;
-  if (conv.paso === 2) {
+  if (conv.paso === 1) {
     conv.datos.busca = userMessage;
-    return responder('Perfecto. En qué zona o ciudad te gustaría?');
+    conv.paso = 2;
+    await guardarEstado();
+    return responder('En que zona o ciudad te gustaria?');
+  }
+  if (conv.paso === 2) {
+    conv.datos.zona = userMessage;
+    conv.paso = 3;
+    await guardarEstado();
+    return responder('Cual es tu presupuesto aproximado?');
   }
   if (conv.paso === 3) {
-    conv.datos.zona = userMessage;
-    return responder('Cuál es tu presupuesto aproximado?');
+    conv.datos.presupuesto = userMessage;
+    conv.paso = 4;
+    await guardarEstado();
+    return responder('Que caracteristicas buscas? Por ejemplo habitaciones, garaje, terraza...');
   }
   if (conv.paso === 4) {
-    conv.datos.presupuesto = userMessage;
-    return responder('Qué características buscas? Por ejemplo habitaciones, garaje, terraza...');
+    conv.datos.caracteristicas = userMessage;
+    conv.paso = 5;
+    await guardarEstado();
+    return responder('Cual es tu nombre completo?');
   }
   if (conv.paso === 5) {
-    conv.datos.caracteristicas = userMessage;
-    return responder('Cuál es tu nombre completo?');
+    conv.datos.nombre = userMessage;
+    conv.paso = 6;
+    await guardarEstado();
+    return responder('Por ultimo, cual es tu numero de telefono de 9 digitos?');
   }
   if (conv.paso === 6) {
-    conv.datos.nombre = userMessage;
-    return responder('Por último, cuál es tu número de teléfono de 9 dígitos?');
-  }
-  if (conv.paso === 7) {
     conv.datos.telefono = userMessage;
     conv.leadGuardado = true;
+    await guardarEstado();
     await guardarYNotificar();
-    return responder(`Perfecto ${conv.datos.nombre}, tengo todos tus datos. Un agente especializado te llamará en menos de 24 horas. Gracias por contactarnos!`);
+    return responder(`Perfecto ${conv.datos.nombre}, tengo todos tus datos. Un agente especializado te llamara en menos de 24 horas. Gracias por contactarnos!`);
   }
 };
