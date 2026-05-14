@@ -62,9 +62,12 @@ module.exports = async function handler(req, res) {
   // Flujo paso a paso
   conv.paso++;
 
-  if (conv.paso === 1) {
-    return responder('Hola! Soy tu agente inmobiliario virtual. Estoy aquí para ayudarte. Cuéntame, buscas comprar, alquilar o vender una propiedad?');
-  }
+  if (conv.paso === 0) {
+  conv.paso = 1;
+  return responder('Hola! Soy tu agente inmobiliario virtual. Estoy aquí para ayudarte. Buscas comprar, alquilar o vender una propiedad?');
+}
+
+conv.paso++;
   if (conv.paso === 2) {
     conv.datos.busca = userMessage;
     return responder('Perfecto. En qué zona o ciudad te gustaría?');
