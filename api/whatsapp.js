@@ -25,7 +25,7 @@ module.exports = async function handler(req, res) {
 
   async function notificarAgente(datos) {
     const client = twilio(TWILIO_SID, TWILIO_TOKEN);
-    const mensaje = `Nuevo lead inmobiliario!\nNombre: ${datos.nombre}\nTeléfono: ${datos.telefono}\nBusca: ${datos.busca}\nZona: ${datos.zona}\nPresupuesto: ${datos.presupuesto}\nCaracterísticas: ${datos.caracteristicas}`;
+    const mensaje = `Nuevo lead inmobiliario!\nNombre: ${datos.nombre}\nTelefono: ${datos.telefono}\nBusca: ${datos.busca}\nZona: ${datos.zona}\nPresupuesto: ${datos.presupuesto}\nCaracteristicas: ${datos.caracteristicas}`;
     await client.messages.create({
       from: 'whatsapp:+14155238886',
       to: AGENTE_NUMERO,
@@ -36,47 +36,56 @@ module.exports = async function handler(req, res) {
   async function guardarLead(datos) {
     await fetch(SHEETS_URL, {
       method: 'POST',
-      mode: 'no-cors',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         accion: 'lead',
-        nombre: datos.nombre,
-        telefono: datos.telefono,
-        busca: datos.busca,
-        zona: datos.zona,
-        presupuesto: datos.presupuesto,
-        caracteristicas: datos.caracteristicas
+        nombre: datos.nombre || '',
+        telefono: datos.telefono || '',
+        busca: datos.busca || '',
+        zona: datos.zona || '',
+        presupuesto: datos.presupuesto || '',
+        caracteristicas: datos.caracteristicas || ''
       })
     }).catch(() => {});
+  }
+
+  const esTelefono = /\b\d{9}\b/.test(userMessage);
+
+  if (esTelefono && !conv.leadGuardado) {
+    conv.datos.telefono = userMessage;
+    conv.leadGuardado = true;
+    await guardarLead(conv.datos);
+    await notificarAgente(conv.datos);
+    return responder('Perfecto, tengo todos tus datos. Un agente te llamará en menos de 24 horas. Gracias por contactarnos!');
   }
 
   const system = `Eres un agente de ventas inmobiliario virtual experto y amable. Tu objetivo es captar el interés del cliente y conseguir sus datos para que un agente humano le llame.
 
 FLUJO DE CONVERSACIÓN:
-1. Saluda y pregunta qué busca (comprar, alquilar, vender)
+1. Saluda y pregunta que busca (comprar, alquilar, vender)
 2. Pregunta zona o ciudad de interés
 3. Pregunta presupuesto aproximado
 4. Pregunta características (habitaciones, garaje, terraza...)
 5. Recoge nombre completo
-6. Recoge teléfono
-7. Confirma que le contactarán en menos de 24 horas
+6. Pide número de teléfono
 
 REGLAS:
 - Responde siempre en español
 - Sé cercano y profesional
 - Máximo 2-3 oraciones por respuesta
 - Haz solo UNA pregunta a la vez
-- Cuando el cliente dé su teléfono, di exactamente: "LEAD_COMPLETO" al final de tu respuesta
 - No inventes precios ni propiedades concretas
 - No uses markdown, asteriscos ni formato especial, solo texto plano`;
 
   conv.historial.push({ role: 'user', content: userMessage });
 
-  // Extraer datos del historial
   const textoCompleto = conv.historial.map(m => m.content).join(' ').toLowerCase();
   if (textoCompleto.includes('comprar')) conv.datos.busca = 'Comprar';
   if (textoCompleto.includes('alquilar')) conv.datos.busca = 'Alquilar';
   if (textoCompleto.includes('vender')) conv.datos.busca = 'Vender';
+
+  const nombreMatch = conv.historial.filter(m => m.role === 'user');
+  if (nombreMatch.length > 4) conv.datos.nombre = userMessage;
 
   try {
     const r = await fetch('https://api.anthropic.com/v1/messages', {
@@ -94,20 +103,10 @@ REGLAS:
       })
     });
     const data = await r.json();
-    let reply = data.content[0].text;
-
-    const estelefono = /\b\d{9}\b/.test(userMessage);
-if (estelefono) {
-      reply = reply.replace('LEAD_COMPLETO', '').trim();
-      conv.datos.nombre = conv.datos.nombre || 'Sin nombre';
-      conv.datos.telefono = userMessage;
-      await guardarLead(conv.datos);
-      await notificarAgente(conv.datos);
-    }
-
+    const reply = data.content[0].text;
     conv.historial.push({ role: 'assistant', content: reply });
     responder(reply);
   } catch (e) {
-    responder('Lo siento, hubo un error. Inténtalo de nuevo.');
+    responder('Lo siento, hubo un error. Intentalo de nuevo.');
   }
 };
