@@ -1,5 +1,4 @@
 const twilio = require('twilio');
-
 const conversaciones = {};
 
 module.exports = async function handler(req, res) {
@@ -8,7 +7,7 @@ module.exports = async function handler(req, res) {
   const userMessage = req.body.Body.trim();
   const from = req.body.From;
 
-  if (!conversaciones[from]) conversaciones[from] = { historial: [], datos: {} };
+  if (!conversaciones[from]) conversaciones[from] = { historial: [], datos: {}, leadGuardado: false };
   const conv = conversaciones[from];
 
   const SHEETS_URL = 'https://script.google.com/macros/s/AKfycbxNJTkjcBXCG7JGMWNPy1pqglZiHOwqek8nBUu9xYGB3X0gm-soUohxkEnIKx8opORy/exec';
@@ -24,68 +23,76 @@ module.exports = async function handler(req, res) {
   }
 
   async function notificarAgente(datos) {
-    const client = twilio(TWILIO_SID, TWILIO_TOKEN);
-    const mensaje = `Nuevo lead inmobiliario!\nNombre: ${datos.nombre}\nTelefono: ${datos.telefono}\nBusca: ${datos.busca}\nZona: ${datos.zona}\nPresupuesto: ${datos.presupuesto}\nCaracteristicas: ${datos.caracteristicas}`;
-    await client.messages.create({
-      from: 'whatsapp:+14155238886',
-      to: AGENTE_NUMERO,
-      body: mensaje
-    }).catch(() => {});
+    try {
+      const client = twilio(TWILIO_SID, TWILIO_TOKEN);
+      await client.messages.create({
+        from: 'whatsapp:+14155238886',
+        to: AGENTE_NUMERO,
+        body: `Nuevo lead!\nNombre: ${datos.nombre}\nTelefono: ${datos.telefono}\nBusca: ${datos.busca}\nZona: ${datos.zona}\nPresupuesto: ${datos.presupuesto}\nCaracteristicas: ${datos.caracteristicas}`
+      });
+    } catch(e) { console.error('Twilio error:', e.message); }
   }
 
   async function guardarLead(datos) {
-    await fetch(SHEETS_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        accion: 'lead',
-        nombre: datos.nombre || '',
-        telefono: datos.telefono || '',
-        busca: datos.busca || '',
-        zona: datos.zona || '',
-        presupuesto: datos.presupuesto || '',
-        caracteristicas: datos.caracteristicas || ''
-      })
-    }).catch(() => {});
+    try {
+      const r = await fetch(SHEETS_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          accion: 'lead',
+          nombre: datos.nombre || '',
+          telefono: datos.telefono || '',
+          busca: datos.busca || '',
+          zona: datos.zona || '',
+          presupuesto: datos.presupuesto || '',
+          caracteristicas: datos.caracteristicas || ''
+        })
+      });
+      console.log('Sheets response:', r.status);
+    } catch(e) { console.error('Sheets error:', e.message); }
   }
 
-  const esTelefono = /\b\d{9}\b/.test(userMessage);
+  const esTelefono = /^\d{9}$/.test(userMessage.replace(/\s/g,''));
 
   if (esTelefono && !conv.leadGuardado) {
     conv.datos.telefono = userMessage;
     conv.leadGuardado = true;
     await guardarLead(conv.datos);
     await notificarAgente(conv.datos);
-    return responder('Perfecto, tengo todos tus datos. Un agente te llamará en menos de 24 horas. Gracias por contactarnos!');
+    return responder('Perfecto, tengo todos tus datos. Un agente especializado te llamara en menos de 24 horas. Gracias por contactarnos!');
   }
 
-  const system = `Eres un agente de ventas inmobiliario virtual experto y amable. Tu objetivo es captar el interés del cliente y conseguir sus datos para que un agente humano le llame.
-
-FLUJO DE CONVERSACIÓN:
-1. Saluda y pregunta que busca (comprar, alquilar, vender)
-2. Pregunta zona o ciudad de interés
-3. Pregunta presupuesto aproximado
-4. Pregunta características (habitaciones, garaje, terraza...)
-5. Recoge nombre completo
-6. Pide número de teléfono
-
-REGLAS:
-- Responde siempre en español
-- Sé cercano y profesional
-- Máximo 2-3 oraciones por respuesta
-- Haz solo UNA pregunta a la vez
-- No inventes precios ni propiedades concretas
-- No uses markdown, asteriscos ni formato especial, solo texto plano`;
+  if (conv.leadGuardado) {
+    return responder('Ya tenemos tus datos. Un agente te llamara pronto. Gracias!');
+  }
 
   conv.historial.push({ role: 'user', content: userMessage });
 
-  const textoCompleto = conv.historial.map(m => m.content).join(' ').toLowerCase();
-  if (textoCompleto.includes('comprar')) conv.datos.busca = 'Comprar';
-  if (textoCompleto.includes('alquilar')) conv.datos.busca = 'Alquilar';
-  if (textoCompleto.includes('vender')) conv.datos.busca = 'Vender';
+  const txt = conv.historial.map(m => m.content).join(' ').toLowerCase();
+  if (txt.includes('comprar')) conv.datos.busca = 'Comprar';
+  if (txt.includes('alquilar')) conv.datos.busca = 'Alquilar';
+  if (txt.includes('vender')) conv.datos.busca = 'Vender';
 
-  const nombreMatch = conv.historial.filter(m => m.role === 'user');
-  if (nombreMatch.length > 4) conv.datos.nombre = userMessage;
+  const userMsgs = conv.historial.filter(m => m.role === 'user');
+  if (userMsgs.length === 5) conv.datos.nombre = userMessage;
+
+  const system = `Eres un agente de ventas inmobiliario virtual experto y amable. Tu objetivo es captar el interés del cliente y conseguir sus datos para que un agente humano le llame.
+
+FLUJO ESTRICTO - sigue este orden exacto:
+1. Pregunta que busca (comprar, alquilar, vender)
+2. Pregunta zona o ciudad
+3. Pregunta presupuesto
+4. Pregunta características (habitaciones, garaje, terraza...)
+5. Pide nombre completo
+6. Pide numero de telefono de 9 digitos
+
+IMPORTANTE: Cuando el cliente te dé su número de teléfono de 9 dígitos, NO respondas nada más - el sistema lo procesará automáticamente.
+
+REGLAS:
+- Responde en español
+- Máximo 2 oraciones por respuesta
+- Una sola pregunta a la vez
+- No uses asteriscos ni markdown, solo texto plano`;
 
   try {
     const r = await fetch('https://api.anthropic.com/v1/messages', {
@@ -97,7 +104,7 @@ REGLAS:
       },
       body: JSON.stringify({
         model: 'claude-haiku-4-5-20251001',
-        max_tokens: 300,
+        max_tokens: 200,
         system,
         messages: conv.historial
       })
@@ -106,7 +113,7 @@ REGLAS:
     const reply = data.content[0].text;
     conv.historial.push({ role: 'assistant', content: reply });
     responder(reply);
-  } catch (e) {
+  } catch(e) {
     responder('Lo siento, hubo un error. Intentalo de nuevo.');
   }
 };
