@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Panel de Leads — Agente Inmobiliario</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f8f4f0;min-height:100vh}
+#login{display:flex;align-items:center;justify-content:center;min-height:100vh}
+.login-box{background:#fff;border-radius:16px;padding:40px;width:320px;box-shadow:0 4px 20px rgba(0,0,0,.1);text-align:center}
+.login-box h1{color:#8B6914;font-size:20px;margin-bottom:8px}
+.login-box p{color:#777;font-size:13px;margin-bottom:24px}
+.login-box input{width:100%;border:1.5px solid #ddd;border-radius:8px;padding:10px 14px;font-size:14px;outline:none;margin-bottom:12px;font-family:inherit}
+.login-box input:focus{border-color:#8B6914}
+.login-box button{width:100%;background:#8B6914;color:#fff;border:none;border-radius:8px;padding:11px;font-size:14px;font-weight:600;cursor:pointer}
+.error{color:#e74c3c;font-size:12px;margin-top:8px}
+#panel{display:none;padding:20px}
+header{background:#8B6914;color:#fff;padding:16px 24px;border-radius:12px;display:flex;align-items:center;justify-content:space-between;margin-bottom:20px}
+header h1{font-size:18px}
+header button{background:rgba(255,255,255,.2);color:#fff;border:none;border-radius:8px;padding:6px 14px;cursor:pointer;font-size:13px}
+.stats{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:20px}
+.stat{background:#fff;border-radius:12px;padding:16px;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,.06)}
+.stat .n{font-size:28px;font-weight:700;color:#8B6914}
+.stat .l{font-size:11px;color:#777;margin-top:4px}
+.filtros{display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap}
+.filtro{background:#fff;border:1.5px solid #ddd;border-radius:20px;padding:6px 14px;font-size:12px;cursor:pointer;font-family:inherit}
+.filtro.active{border-color:#8B6914;background:#fdf5e6;color:#8B6914;font-weight:600}
+table{width:100%;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.06);border-collapse:collapse}
+th{background:#8B6914;color:#fff;padding:12px 14px;font-size:12px;font-weight:500;text-align:left}
+td{padding:12px 14px;font-size:13px;border-bottom:1px solid #f0f0f0;color:#333}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:#fdf9f3}
+.estado{padding:4px 10px;border-radius:20px;font-size:11px;font-weight:600;display:inline-block}
+.estado.Nuevo{background:#fff3cd;color:#856404}
+.estado.Contactado{background:#cfe2ff;color:#084298}
+.estado.Interesado{background:#d1e7dd;color:#0a3622}
+.estado.Cerrado{background:#d4edda;color:#155724}
+.estado.Descartado{background:#f8d7da;color:#842029}
+select.est-sel{border:1px solid #ddd;border-radius:6px;padding:4px 8px;font-size:11px;cursor:pointer;outline:none}
+.refresh{background:#8B6914;color:#fff;border:none;border-radius:8px;padding:8px 16px;cursor:pointer;font-size:13px;margin-bottom:16px}
+.vacio{text-align:center;padding:40px;color:#aaa;font-size:14px}
+.tel a{color:#8B6914;text-decoration:none}
+</style>
+</head>
+<body>
+
+<div id="login">
+  <div class="login-box">
+    <h1>🏡 Panel de Leads</h1>
+    <p>Agente Inmobiliario Virtual</p>
+    <input id="user" type="text" placeholder="Usuario"/>
+    <input id="pass" type="password" placeholder="Contraseña"/>
+    <button onclick="entrar()">Entrar</button>
+    <div class="error" id="err"></div>
+  </div>
+</div>
+
+<div id="panel">
+  <header>
+    <h1>🏡 Panel de Leads Inmobiliarios</h1>
+    <button onclick="salir()">Cerrar sesión</button>
+  </header>
+
+  <div class="stats">
+    <div class="stat"><div class="n" id="s-total">0</div><div class="l">Total leads</div></div>
+    <div class="stat"><div class="n" id="s-nuevo" style="color:#856404">0</div><div class="l">Nuevos</div></div>
+    <div class="stat"><div class="n" id="s-contactado" style="color:#084298">0</div><div class="l">Contactados</div></div>
+    <div class="stat"><div class="n" id="s-interesado" style="color:#0a3622">0</div><div class="l">Interesados</div></div>
+    <div class="stat"><div class="n" id="s-cerrado" style="color:#155724">0</div><div class="l">Cerrados</div></div>
+  </div>
+
+  <button class="refresh" onclick="cargarLeads()">↻ Actualizar</button>
+
+  <div class="filtros">
+    <button class="filtro active" onclick="filtrar('Todos',this)">Todos</button>
+    <button class="filtro" onclick="filtrar('Nuevo',this)">Nuevos</button>
+    <button class="filtro" onclick="filtrar('Contactado',this)">Contactados</button>
+    <button class="filtro" onclick="filtrar('Interesado',this)">Interesados</button>
+    <button class="filtro" onclick="filtrar('Cerrado',this)">Cerrados</button>
+    <button class="filtro" onclick="filtrar('Descartado',this)">Descartados</button>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Fecha</th>
+        <th>Nombre</th>
+        <th>Teléfono</th>
+        <th>Busca</th>
+        <th>Zona</th>
+        <th>Presupuesto</th>
+        <th>Características</th>
+        <th>Estado</th>
+      </tr>
+    </thead>
+    <tbody id="tabla"></tbody>
+  </table>
+</div>
+
+<script>
+var SHEETS_URL = 'https://script.google.com/macros/s/AKfycbxNJTkjcBXCG7JGMWNPy1pqglZiHOwqek8nBUu9xYGB3X0gm-soUohxkEnIKx8opORy/exec';
+var USUARIO = 'inmobiliaria';
+var PASSWORD = 'agente2024';
+var todosLeads = [];
+var filtroActual = 'Todos';
+
+function entrar() {
+  var u = document.getElementById('user').value;
+  var p = document.getElementById('pass').value;
+  if (u === USUARIO && p === PASSWORD) {
+    document.getElementById('login').style.display = 'none';
+    document.getElementById('panel').style.display = 'block';
+    cargarLeads();
+  } else {
+    document.getElementById('err').textContent = 'Usuario o contraseña incorrectos';
+  }
+}
+
+function salir() {
+  document.getElementById('login').style.display = 'flex';
+  document.getElementById('panel').style.display = 'none';
+  document.getElementById('user').value = '';
+  document.getElementById('pass').value = '';
+}
+
+async function cargarLeads() {
+  try {
+    var r = await fetch(SHEETS_URL + '?sheet=leads');
+    var data = await r.json();
+    todosLeads = Array.isArray(data) ? data : [];
+    actualizarStats();
+    renderTabla(filtroActual);
+  } catch(e) {
+    console.error(e);
+  }
+}
+
+function actualizarStats() {
+  document.getElementById('s-total').textContent = todosLeads.length;
+  document.getElementById('s-nuevo').textContent = todosLeads.filter(l=>l.estado==='Nuevo').length;
+  document.getElementById('s-contactado').textContent = todosLeads.filter(l=>l.estado==='Contactado').length;
+  document.getElementById('s-interesado').textContent = todosLeads.filter(l=>l.estado==='Interesado').length;
+  document.getElementById('s-cerrado').textContent = todosLeads.filter(l=>l.estado==='Cerrado').length;
+}
+
+function renderTabla(filtro) {
+  var tbody = document.getElementById('tabla');
+  var leads = filtro === 'Todos' ? todosLeads : todosLeads.filter(l=>l.estado===filtro);
+  if (leads.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="8" class="vacio">No hay leads para mostrar</td></tr>';
+    return;
+  }
+  tbody.innerHTML = leads.map(function(l) {
+    return '<tr>'+
+      '<td>'+l.fecha+'</td>'+
+      '<td><strong>'+l.nombre+'</strong></td>'+
+      '<td class="tel"><a href="tel:'+l.telefono+'">'+l.telefono+'</a></td>'+
+      '<td>'+l.busca+'</td>'+
+      '<td>'+l.zona+'</td>'+
+      '<td>'+l.presupuesto+'</td>'+
+      '<td>'+l.caracteristicas+'</td>'+
+      '<td>'+
+        '<select class="est-sel" onchange="cambiarEstado('+l.fila+',this.value)">'+
+          ['Nuevo','Contactado','Interesado','Cerrado','Descartado'].map(function(e){
+            return '<option'+(e===l.estado?' selected':'')+'>'+e+'</option>';
+          }).join('')+
+        '</select>'+
+      '</td>'+
+    '</tr>';
+  }).join('');
+}
+
+function filtrar(f, btn) {
+  filtroActual = f;
+  document.querySelectorAll('.filtro').forEach(function(b){b.classList.remove('active')});
+  btn.classList.add('active');
+  renderTabla(f);
+}
+
+async function cambiarEstado(fila, estado) {
+  try {
+    await fetch(SHEETS_URL, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({accion:'actualizarLead', fila:fila, estado:estado})
+    });
+    await cargarLeads();
+  } catch(e) { console.error(e); }
+}
+
+document.getElementById('user').addEventListener('keydown', function(e){if(e.key==='Enter')entrar()});
+document.getElementById('pass').addEventListener('keydown', function(e){if(e.key==='Enter')entrar()});
+</script>
+</body>
+</html>
