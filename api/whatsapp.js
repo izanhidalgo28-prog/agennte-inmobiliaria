@@ -221,3 +221,4 @@ Responde en español, de forma concisa y directa, sin preámbulos.`;
     await guardarYNotificar();
     return responder(`Perfecto ${conv.datos.nombre}, tengo todos tus datos. Un agente especializado te llamara en menos de 24 horas. Gracias por contactarnos!`);
   }
+ };
