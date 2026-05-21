@@ -1,6 +1,5 @@
 const twilio = require('twilio');
 const { Redis } = require('@upstash/redis');
-
 const redis = new Redis({
   url: process.env.UPSTASH_REDIS_REST_URL,
   token: process.env.UPSTASH_REDIS_REST_TOKEN,
@@ -8,21 +7,18 @@ const redis = new Redis({
 
 module.exports = async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end();
-
   const userMessage = req.body.Body.trim();
   const from = req.body.From;
-
   const SHEETS_URL = 'https://script.google.com/macros/s/AKfycbxNJTkjcBXCG7JGMWNPy1pqglZiHOwqek8nBUu9xYGB3X0gm-soUohxkEnIKx8opORy/exec';
   const TWILIO_SID = 'AC86a36860c56d30c195c4c83a1ad6fd45';
   const TWILIO_TOKEN = 'f9e4f906049ed68e4d91ab5de1b96726';
   const AGENTE_NUMERO = 'whatsapp:+34684190200';
 
-  // Cargar estado desde Redis
   let conv = await redis.get(from);
   if (!conv) conv = { paso: 0, datos: {}, leadGuardado: false };
 
   async function guardarEstado() {
-    await redis.set(from, conv, { ex: 86400 }); // expira en 24h
+    await redis.set(from, conv, { ex: 86400 });
   }
 
   function responder(texto) {
@@ -48,7 +44,6 @@ module.exports = async function handler(req, res) {
         })
       });
     } catch(e) { console.error('Sheets error:', e.message); }
-
     try {
       const client = twilio(TWILIO_SID, TWILIO_TOKEN);
       await client.messages.create({
@@ -59,6 +54,87 @@ module.exports = async function handler(req, res) {
     } catch(e) { console.error('Twilio error:', e.message); }
   }
 
+  async function valorarConIA() {
+    const d = conv.datos;
+    const prompt = `Eres un experto inmobiliario en Elche, España. 
+Estima el precio de venta de este inmueble basándote en el mercado actual de Elche:
+- Tipo: ${d.tipo}
+- Zona/barrio: ${d.zonaValor}
+- Metros cuadrados: ${d.metros}
+- Habitaciones: ${d.habitaciones}
+- Baños: ${d.banos}
+- Estado: ${d.estado}
+
+Da una estimación realista con un rango de precio (mínimo y máximo) y una breve explicación de 2-3 líneas. 
+Responde en español, de forma concisa y directa, sin preámbulos.`;
+
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': process.env.ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01'
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 300,
+        messages: [{ role: 'user', content: prompt }]
+      })
+    });
+    const data = await response.json();
+    return data.content[0].text;
+  }
+
+  // ── MODO VALORACIÓN ──────────────────────────────────────────
+
+  if (conv.modo === 'valoracion') {
+    if (conv.paso === 11) {
+      conv.datos.tipo = userMessage;
+      conv.paso = 12;
+      await guardarEstado();
+      return responder('¿En qué zona o barrio de Elche está el inmueble?');
+    }
+    if (conv.paso === 12) {
+      conv.datos.zonaValor = userMessage;
+      conv.paso = 13;
+      await guardarEstado();
+      return responder('¿Cuántos metros cuadrados tiene?');
+    }
+    if (conv.paso === 13) {
+      conv.datos.metros = userMessage;
+      conv.paso = 14;
+      await guardarEstado();
+      return responder('¿Cuántas habitaciones tiene?');
+    }
+    if (conv.paso === 14) {
+      conv.datos.habitaciones = userMessage;
+      conv.paso = 15;
+      await guardarEstado();
+      return responder('¿Cuántos baños tiene?');
+    }
+    if (conv.paso === 15) {
+      conv.datos.banos = userMessage;
+      conv.paso = 16;
+      await guardarEstado();
+      return responder('¿En qué estado está? (nueva construcción / buen estado / a reformar)');
+    }
+    if (conv.paso === 16) {
+      conv.datos.estado = userMessage;
+      await guardarEstado();
+      try {
+        const valoracion = await valorarConIA();
+        // Resetear conversación
+        await redis.del(from);
+        return responder(`Valoración de tu inmueble:\n\n${valoracion}\n\n¿Quieres que un agente te contacte para una valoración más detallada? Responde SI o NO.`);
+      } catch(e) {
+        console.error('Error IA:', e.message);
+        return responder('Lo siento, no pude calcular la valoración ahora mismo. Inténtalo de nuevo más tarde.');
+      }
+    }
+  }
+
+  // ── FLUJO PRINCIPAL ──────────────────────────────────────────
+
   if (conv.leadGuardado) {
     return responder('Ya tenemos tus datos. Un agente te contactara pronto. Gracias!');
   }
@@ -66,15 +142,23 @@ module.exports = async function handler(req, res) {
   if (conv.paso === 0) {
     conv.paso = 1;
     await guardarEstado();
-    return responder('Hola! Soy tu agente inmobiliario virtual. Buscas comprar, alquilar o vender una propiedad?');
+    return responder('Hola! Soy tu agente inmobiliario virtual.\n\n¿Qué necesitas?\n1️⃣ Comprar, alquilar o vender una propiedad\n2️⃣ Valorar mi inmueble');
   }
 
   if (conv.paso === 1) {
+    const msg = userMessage.toLowerCase();
+    if (msg.includes('valor') || msg.includes('2')) {
+      conv.modo = 'valoracion';
+      conv.paso = 11;
+      await guardarEstado();
+      return responder('Perfecto! Voy a valorar tu inmueble. ¿Qué tipo de propiedad es? (piso / casa / chalet / local / otro)');
+    }
     conv.datos.busca = userMessage;
     conv.paso = 2;
     await guardarEstado();
     return responder('En que zona o ciudad te gustaria?');
   }
+
   if (conv.paso === 2) {
     conv.datos.zona = userMessage;
     conv.paso = 3;
