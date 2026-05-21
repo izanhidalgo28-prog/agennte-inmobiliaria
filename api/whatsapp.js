@@ -133,6 +133,17 @@ Responde en español, de forma concisa y directa, sin preámbulos.`;
     }
   }
 
+  // Helpers de validación
+  function esTelefonoValido(t) {
+    return /^[6789]\d{8}$/.test(t.replace(/\s/g,''));
+  }
+  function esNumeroValido(n) {
+    return /^\d+$/.test(n.replace(/\s/g,''));
+  }
+  function esTextoValido(t) {
+    return t.length >= 2 && t.length <= 100;
+  }
+
   // ── FLUJO PRINCIPAL ──────────────────────────────────────────
 
   if (conv.leadGuardado) {
@@ -160,34 +171,53 @@ Responde en español, de forma concisa y directa, sin preámbulos.`;
   }
 
   if (conv.paso === 2) {
+    if (!esTextoValido(userMessage)) {
+      return responder('Por favor escribe una zona válida (ej: Elche centro, Altabix, Carrús...)');
+    }
     conv.datos.zona = userMessage;
     conv.paso = 3;
     await guardarEstado();
-    return responder('Cual es tu presupuesto aproximado?');
+    return responder('Cual es tu presupuesto aproximado? (solo el número, ej: 150000)');
   }
+
   if (conv.paso === 3) {
-    conv.datos.presupuesto = userMessage;
+    const limpio = userMessage.replace(/[€.\s]/g,'');
+    if (!esNumeroValido(limpio)) {
+      return responder('Por favor escribe solo el número, sin letras ni símbolos. Ej: 150000');
+    }
+    conv.datos.presupuesto = limpio + '€';
     conv.paso = 4;
     await guardarEstado();
-    return responder('Que caracteristicas buscas? Por ejemplo habitaciones, garaje, terraza...');
+    return responder('Que caracteristicas buscas? Por ejemplo: 3 habitaciones, garaje, terraza...');
   }
+
   if (conv.paso === 4) {
+    if (!esTextoValido(userMessage)) {
+      return responder('Por favor describe las características que buscas (mínimo 2 caracteres)');
+    }
     conv.datos.caracteristicas = userMessage;
     conv.paso = 5;
     await guardarEstado();
     return responder('Cual es tu nombre completo?');
   }
+
   if (conv.paso === 5) {
+    if (!esTextoValido(userMessage) || /\d/.test(userMessage)) {
+      return responder('Por favor escribe tu nombre completo sin números');
+    }
     conv.datos.nombre = userMessage;
     conv.paso = 6;
     await guardarEstado();
     return responder('Por ultimo, cual es tu numero de telefono de 9 digitos?');
   }
+
   if (conv.paso === 6) {
-    conv.datos.telefono = userMessage;
+    if (!esTelefonoValido(userMessage)) {
+      return responder('El teléfono no parece válido. Escribe 9 dígitos empezando por 6, 7, 8 o 9. Ej: 612345678');
+    }
+    conv.datos.telefono = userMessage.replace(/\s/g,'');
     conv.leadGuardado = true;
     await guardarEstado();
     await guardarYNotificar();
     return responder(`Perfecto ${conv.datos.nombre}, tengo todos tus datos. Un agente especializado te llamara en menos de 24 horas. Gracias por contactarnos!`);
   }
-};
