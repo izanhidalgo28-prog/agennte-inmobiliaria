@@ -54,6 +54,30 @@ module.exports = async function handler(req, res) {
     } catch(e) { console.error('Twilio error:', e.message); }
   }
 
+  async function consultarIA(pregunta) {
+    const system = `Eres ALEX, un agente inmobiliario virtual experto en el mercado de Elche y alrededores (Alicante, España). 
+Ayudas a compradores, vendedores e inversores con información sobre precios, zonas, hipotecas y el proceso de compraventa.
+Responde en español, de forma cercana y profesional. Máximo 3-4 oraciones. No inventes datos concretos de propiedades específicas.
+Si alguien quiere comprar, vender o alquilar, indícale que escriba "inicio" para empezar el proceso.`;
+
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': process.env.ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01'
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 300,
+        system,
+        messages: [{ role: 'user', content: pregunta }]
+      })
+    });
+    const data = await response.json();
+    return data.content[0].text;
+  }
+
   async function valorarConIA() {
     const d = conv.datos;
     const prompt = `Eres un experto inmobiliario en Elche, España. 
@@ -83,6 +107,17 @@ Responde en español, de forma concisa y directa, sin preámbulos.`;
     });
     const data = await response.json();
     return data.content[0].text;
+  }
+
+  // Helpers de validación
+  function esTelefonoValido(t) {
+    return /^[6789]\d{8}$/.test(t.replace(/\s/g,''));
+  }
+  function esNumeroValido(n) {
+    return /^\d+$/.test(n.replace(/\s/g,''));
+  }
+  function esTextoValido(t) {
+    return t.length >= 2 && t.length <= 100;
   }
 
   // ── MODO VALORACIÓN ──────────────────────────────────────────
@@ -123,9 +158,10 @@ Responde en español, de forma concisa y directa, sin preámbulos.`;
       await guardarEstado();
       try {
         const valoracion = await valorarConIA();
-        // Resetear conversación
-        await redis.del(from);
-        return responder(`Valoración de tu inmueble:\n\n${valoracion}\n\n¿Quieres que un agente te contacte para una valoración más detallada? Responde SI o NO.`);
+        conv.modo = 'consulta';
+        conv.leadGuardado = true;
+        await guardarEstado();
+        return responder(`Valoración de tu inmueble:\n\n${valoracion}\n\n¿Tienes alguna otra pregunta? Puedo ayudarte con información sobre el mercado, hipotecas o zonas de Elche. Si quieres que un agente te contacte escribe "agente".`);
       } catch(e) {
         console.error('Error IA:', e.message);
         return responder('Lo siento, no pude calcular la valoración ahora mismo. Inténtalo de nuevo más tarde.');
@@ -133,27 +169,37 @@ Responde en español, de forma concisa y directa, sin preámbulos.`;
     }
   }
 
-  // Helpers de validación
-  function esTelefonoValido(t) {
-    return /^[6789]\d{8}$/.test(t.replace(/\s/g,''));
-  }
-  function esNumeroValido(n) {
-    return /^\d+$/.test(n.replace(/\s/g,''));
-  }
-  function esTextoValido(t) {
-    return t.length >= 2 && t.length <= 100;
+  // ── MODO CONSULTA LIBRE ──────────────────────────────────────
+
+  if (conv.modo === 'consulta') {
+    const msg = userMessage.toLowerCase();
+    if (msg.includes('agente') || msg.includes('contactar') || msg.includes('llamar')) {
+      return responder('Perfecto, un agente se pondrá en contacto contigo pronto. Si tienes más preguntas sobre el mercado inmobiliario, aquí estoy 😊');
+    }
+    if (msg === 'inicio') {
+      await redis.del(from);
+      return responder('¡Claro! Soy ALEX, tu agente inmobiliario virtual.\n\n¿Qué necesitas?\n1️⃣ Comprar, alquilar o vender una propiedad\n2️⃣ Valorar mi inmueble');
+    }
+    try {
+      const respuesta = await consultarIA(userMessage);
+      return responder(respuesta);
+    } catch(e) {
+      return responder('Lo siento, no pude responder ahora mismo. Inténtalo de nuevo.');
+    }
   }
 
   // ── FLUJO PRINCIPAL ──────────────────────────────────────────
 
-  if (conv.leadGuardado) {
-    return responder('Ya tenemos tus datos. Un agente te contactara pronto. Gracias!');
+  if (conv.leadGuardado && conv.modo !== 'consulta') {
+    conv.modo = 'consulta';
+    await guardarEstado();
+    return responder(`¡Hola de nuevo! Tus datos ya están guardados y un agente te contactará pronto. Mientras tanto puedo resolver cualquier duda sobre el mercado inmobiliario. ¿En qué puedo ayudarte? 😊`);
   }
 
   if (conv.paso === 0) {
     conv.paso = 1;
     await guardarEstado();
-    return responder('Hola! Soy tu agente inmobiliario virtual.\n\n¿Qué necesitas?\n1️⃣ Comprar, alquilar o vender una propiedad\n2️⃣ Valorar mi inmueble');
+    return responder('¡Hola! Soy ALEX, tu agente inmobiliario virtual 🏡\n\n¿Qué necesitas?\n1️⃣ Comprar, alquilar o vender una propiedad\n2️⃣ Valorar mi inmueble');
   }
 
   if (conv.paso === 1) {
@@ -162,12 +208,18 @@ Responde en español, de forma concisa y directa, sin preámbulos.`;
       conv.modo = 'valoracion';
       conv.paso = 11;
       await guardarEstado();
-      return responder('Perfecto! Voy a valorar tu inmueble. ¿Qué tipo de propiedad es? (piso / casa / chalet / local / otro)');
+      return responder('Perfecto, voy a valorar tu inmueble. ¿Qué tipo de propiedad es? (piso / casa / chalet / local / otro)');
+    }
+    if (msg.includes('vender')) {
+      conv.datos.busca = 'Vender propiedad';
+      conv.paso = 2;
+      await guardarEstado();
+      return responder('Entendido, quieres vender. ¿En qué zona está tu propiedad?');
     }
     conv.datos.busca = userMessage;
     conv.paso = 2;
     await guardarEstado();
-    return responder('En que zona o ciudad te gustaria?');
+    return responder('¿En qué zona o ciudad te gustaría?');
   }
 
   if (conv.paso === 2) {
@@ -177,7 +229,7 @@ Responde en español, de forma concisa y directa, sin preámbulos.`;
     conv.datos.zona = userMessage;
     conv.paso = 3;
     await guardarEstado();
-    return responder('Cual es tu presupuesto aproximado? (solo el número, ej: 150000)');
+    return responder('¿Cuál es tu presupuesto aproximado? (solo el número, ej: 150000)');
   }
 
   if (conv.paso === 3) {
@@ -188,7 +240,7 @@ Responde en español, de forma concisa y directa, sin preámbulos.`;
     conv.datos.presupuesto = limpio + '€';
     conv.paso = 4;
     await guardarEstado();
-    return responder('Que caracteristicas buscas? Por ejemplo: 3 habitaciones, garaje, terraza...');
+    return responder('¿Qué características buscas? Por ejemplo: 3 habitaciones, garaje, terraza...');
   }
 
   if (conv.paso === 4) {
@@ -198,7 +250,7 @@ Responde en español, de forma concisa y directa, sin preámbulos.`;
     conv.datos.caracteristicas = userMessage;
     conv.paso = 5;
     await guardarEstado();
-    return responder('Cual es tu nombre completo?');
+    return responder('¿Cuál es tu nombre completo?');
   }
 
   if (conv.paso === 5) {
@@ -208,7 +260,7 @@ Responde en español, de forma concisa y directa, sin preámbulos.`;
     conv.datos.nombre = userMessage;
     conv.paso = 6;
     await guardarEstado();
-    return responder('Por ultimo, cual es tu numero de telefono de 9 digitos?');
+    return responder('Por último, ¿cuál es tu número de teléfono de 9 dígitos?');
   }
 
   if (conv.paso === 6) {
@@ -217,8 +269,9 @@ Responde en español, de forma concisa y directa, sin preámbulos.`;
     }
     conv.datos.telefono = userMessage.replace(/\s/g,'');
     conv.leadGuardado = true;
+    conv.modo = 'consulta';
     await guardarEstado();
     await guardarYNotificar();
-    return responder(`Perfecto ${conv.datos.nombre}, tengo todos tus datos. Un agente especializado te llamara en menos de 24 horas. Gracias por contactarnos!`);
+    return responder(`Perfecto ${conv.datos.nombre} 🙌 Tus datos han quedado registrados. Un agente especializado te llamará en menos de 24 horas.\n\nMientras tanto puedo resolver cualquier duda sobre el mercado inmobiliario, hipotecas o zonas de Elche. ¿Alguna pregunta?`);
   }
- };
+};
