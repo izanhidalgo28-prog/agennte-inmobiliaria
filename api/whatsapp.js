@@ -68,7 +68,7 @@ Si alguien quiere comprar, vender o alquilar, indícale que escriba "inicio" par
         'anthropic-version': '2023-06-01'
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-sonnet-4-5',
         max_tokens: 300,
         system,
         messages: [{ role: 'user', content: pregunta }]
