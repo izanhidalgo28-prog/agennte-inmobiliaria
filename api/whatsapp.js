@@ -75,7 +75,6 @@ Si alguien quiere comprar, vender o alquilar, indícale que escriba "inicio" par
       })
     });
     const data = await response.json();
-console.log('Anthropic response:', JSON.stringify(data)); // ← añade esta línea
     return data.content[0].text;
   }
 
