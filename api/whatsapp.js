@@ -120,7 +120,7 @@ module.exports = async function handler(req, res) {
   const from = req.body.From;
   const SHEETS_URL = 'https://script.google.com/macros/s/AKfycbxNJTkjcBXCG7JGMWNPy1pqglZiHOwqek8nBUu9xYGB3X0gm-soUohxkEnIKx8opORy/exec';
   const TWILIO_SID = 'AC86a36860c56d30c195c4c83a1ad6fd45';
-  const TWILIO_TOKEN = '59259a62d3d510971dc87ea234cc1af4';
+  const TWILIO_TOKEN = '3a63515a6a1ce991d03a3cd8df1517fc';
   const AGENTE_NUMERO = 'whatsapp:+34684190200';
 
   let conv = await redis.get(from);
