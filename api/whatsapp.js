@@ -32,6 +32,9 @@ const T = {
     telefonoPregunta: 'Por último, ¿cuál es tu número de teléfono de 9 dígitos?',
     telefonoInvalido: 'El teléfono no parece válido. Escribe 9 dígitos empezando por 6, 7, 8 o 9. Ej: 612345678',
     leadGuardado: (nombre) => `Perfecto ${nombre} 🙌 Tus datos han quedado registrados. Un agente especializado te llamará en menos de 24 horas.\n\nMientras tanto puedo resolver cualquier duda sobre el mercado inmobiliario, hipotecas o zonas de Elche. ¿Alguna pregunta?`,
+    propiedadesEncontradas: (n) => `🏠 He encontrado ${n} propiedad${n>1?'es':''} que puede${n>1?'n':''} interesarte:`,
+    propiedadFicha: (p) => `📍 ${p.tipo} en ${p.zona}\n💰 ${Number(p.precio).toLocaleString('es-ES')}€\n🛏 ${p.habitaciones} hab · 🚿 ${p.banos} baños · 📐 ${p.metros}m²\n✨ ${p.caracteristicas}`,
+    sinPropiedades: '📋 En este momento no tenemos propiedades en tu zona y presupuesto, pero un agente buscará personalmente para ti. ¿Tienes alguna otra pregunta?',
     holaDeNuevo: '¡Hola de nuevo! Tus datos ya están guardados y un agente te contactará pronto. Mientras tanto puedo resolver cualquier duda sobre el mercado inmobiliario. ¿En qué puedo ayudarte? 😊',
     agenteContacto: 'Perfecto, un agente se pondrá en contacto contigo pronto. Si tienes más preguntas sobre el mercado inmobiliario, aquí estoy 😊',
     reinicio: '¡Claro! Soy ALEX, tu agente inmobiliario virtual.\n\n¿Qué necesitas?\n1️⃣ Comprar, alquilar o vender una propiedad\n2️⃣ Valorar mi inmueble',
@@ -59,6 +62,9 @@ const T = {
     telefonoPregunta: 'Lastly, what\'s your phone number?',
     telefonoInvalido: 'That phone number doesn\'t look valid. Please write a valid Spanish number, e.g. 612345678',
     leadGuardado: (nombre) => `Perfect ${nombre} 🙌 Your details have been registered. A specialised agent will call you within 24 hours.\n\nMeanwhile, I can help with any questions about the real estate market, mortgages or areas in Elche. Any questions?`,
+    propiedadesEncontradas: (n) => `🏠 I found ${n} propert${n>1?'ies':'y'} that might interest you:`,
+    propiedadFicha: (p) => `📍 ${p.tipo} in ${p.zona}\n💰 €${Number(p.precio).toLocaleString('en-GB')}\n🛏 ${p.habitaciones} bed · 🚿 ${p.banos} bath · 📐 ${p.metros}m²\n✨ ${p.caracteristicas}`,
+    sinPropiedades: '📋 We don\'t currently have properties matching your area and budget, but an agent will search personally for you. Any other questions?',
     holaDeNuevo: 'Hi again! Your details are already saved and an agent will contact you soon. Meanwhile, I can help with any real estate questions. How can I help? 😊',
     agenteContacto: 'Great, an agent will contact you soon. If you have more questions about the real estate market, I\'m here 😊',
     reinicio: 'Sure! I\'m ALEX, your virtual real estate agent.\n\nWhat do you need?\n1️⃣ Buy, rent or sell a property\n2️⃣ Value my property',
@@ -86,6 +92,9 @@ const T = {
     telefonoPregunta: 'Zuletzt, wie ist Ihre Telefonnummer?',
     telefonoInvalido: 'Diese Telefonnummer scheint ungültig. Bitte geben Sie eine gültige spanische Nummer an, z.B. 612345678',
     leadGuardado: (nombre) => `Perfekt ${nombre} 🙌 Ihre Daten wurden registriert. Ein spezialisierter Makler wird Sie innerhalb von 24 Stunden anrufen.\n\nIn der Zwischenzeit helfe ich gerne bei Fragen zum Immobilienmarkt, Hypotheken oder Gegenden in Elche. Haben Sie Fragen?`,
+    propiedadesEncontradas: (n) => `🏠 Ich habe ${n} Immobilie${n>1?'n':''} gefunden, die Sie interessieren könnte${n>1?'n':''}:`,
+    propiedadFicha: (p) => `📍 ${p.tipo} in ${p.zona}\n💰 ${Number(p.precio).toLocaleString('de-DE')}€\n🛏 ${p.habitaciones} Zi. · 🚿 ${p.banos} Bad · 📐 ${p.metros}m²\n✨ ${p.caracteristicas}`,
+    sinPropiedades: '📋 Wir haben derzeit keine Immobilien in Ihrer Zone und Ihrem Budget, aber ein Makler wird persönlich für Sie suchen. Haben Sie weitere Fragen?',
     holaDeNuevo: 'Hallo wieder! Ihre Daten sind bereits gespeichert und ein Makler wird Sie bald kontaktieren. In der Zwischenzeit helfe ich gerne bei Immobilienfragen. Wie kann ich helfen? 😊',
     agenteContacto: 'Perfekt, ein Makler wird Sie bald kontaktieren. Wenn Sie weitere Fragen zum Immobilienmarkt haben, bin ich hier 😊',
     reinicio: 'Klar! Ich bin ALEX, Ihr virtueller Immobilienmakler.\n\nWas brauchen Sie?\n1️⃣ Kaufen, mieten oder verkaufen\n2️⃣ Meine Immobilie bewerten',
@@ -125,6 +134,25 @@ module.exports = async function handler(req, res) {
     res.status(200).send(twiml.toString());
   }
 
+  // ── BUSCAR PROPIEDADES COINCIDENTES ──────────────────────────
+  async function buscarPropiedades(zona, presupuesto) {
+    try {
+      const r = await fetch(SHEETS_URL + '?sheet=propiedades');
+      const props = await r.json();
+      if (!Array.isArray(props)) return [];
+      const presupuestoNum = parseInt(presupuesto.replace(/[^0-9]/g,''));
+      const zonaLower = zona.toLowerCase();
+      return props.filter(p => {
+        const precioOk = Number(p.precio) <= presupuestoNum;
+        const zonaOk = p.zona.toLowerCase().includes(zonaLower) || zonaLower.includes(p.zona.toLowerCase());
+        return precioOk && zonaOk;
+      }).slice(0, 3);
+    } catch(e) {
+      console.error('Error buscando propiedades:', e.message);
+      return [];
+    }
+  }
+
   async function guardarYNotificar() {
     try {
       await fetch(SHEETS_URL, {
@@ -141,6 +169,8 @@ module.exports = async function handler(req, res) {
         })
       });
     } catch(e) { console.error('Sheets error:', e.message); }
+
+    // Notificar al agente
     try {
       const client = twilio(TWILIO_SID, TWILIO_TOKEN);
       await client.messages.create({
@@ -148,7 +178,33 @@ module.exports = async function handler(req, res) {
         to: AGENTE_NUMERO,
         body: `Nuevo lead! (idioma: ${conv.idioma})\nNombre: ${conv.datos.nombre}\nTelefono: ${conv.datos.telefono}\nBusca: ${conv.datos.busca}\nZona: ${conv.datos.zona}\nPresupuesto: ${conv.datos.presupuesto}\nCaracteristicas: ${conv.datos.caracteristicas}`
       });
-    } catch(e) { console.error('Twilio error:', e.message); }
+    } catch(e) { console.error('Twilio error agente:', e.message); }
+
+    // Buscar y enviar propiedades al lead
+    try {
+      const propiedades = await buscarPropiedades(conv.datos.zona, conv.datos.presupuesto);
+      const client = twilio(TWILIO_SID, TWILIO_TOKEN);
+      if (propiedades.length > 0) {
+        await client.messages.create({
+          from: 'whatsapp:+14155238886',
+          to: from,
+          body: L.propiedadesEncontradas(propiedades.length)
+        });
+        for (const p of propiedades) {
+          await client.messages.create({
+            from: 'whatsapp:+14155238886',
+            to: from,
+            body: L.propiedadFicha(p)
+          });
+        }
+      } else {
+        await client.messages.create({
+          from: 'whatsapp:+14155238886',
+          to: from,
+          body: L.sinPropiedades
+        });
+      }
+    } catch(e) { console.error('Twilio error propiedades:', e.message); }
   }
 
   async function consultarIA(pregunta) {
@@ -194,7 +250,7 @@ module.exports = async function handler(req, res) {
         'anthropic-version': '2023-06-01'
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-sonnet-4-5',
         max_tokens: 300,
         messages: [{ role: 'user', content: prompt }]
       })
