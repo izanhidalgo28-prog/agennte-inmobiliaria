@@ -118,7 +118,7 @@ module.exports = async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end();
   const userMessage = req.body.Body.trim();
   const from = req.body.From;
-  const SHEETS_URL = 'https://script.google.com/macros/s/AKfycbxNJTkjcBXCG7JGMWNPy1pqglZiHOwqek8nBUu9xYGB3X0gm-soUohxkEnIKx8opORy/exec';
+  const SHEETS_URL = 'https://script.google.com/macros/s/AKfycbwefw0NRQ1y-6H8AzDAswmdB5-OVwo7B4Fk4B8XMS97X_KChBIIZ3ijfbwISaWVKWdB/exec';
   const TWILIO_SID = 'AC86a36860c56d30c195c4c83a1ad6fd45';
   const TWILIO_TOKEN = '3a63515a6a1ce991d03a3cd8df1517fc';
   const AGENTE_NUMERO = 'whatsapp:+34684190200';
